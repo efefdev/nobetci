@@ -12,10 +12,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     # IDE and local repository execution
-    from core.soc_config import load_soc_config
+    from core.soc_config import load_soc_config, CLOUDFLARE_PREFIXES
 except ImportError:
     # Production flattened execution (/usr/local/bin)
-    from soc_config import load_soc_config  # type: ignore
+    from soc_config import load_soc_config, CLOUDFLARE_PREFIXES  # type: ignore
 
 config = load_soc_config()
 DB_PATH = config.get("DB_PATH", "/var/lib/soc/soc_logs.db")
