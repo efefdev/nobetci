@@ -7,10 +7,10 @@ class Telegram:
         self.token = token
         self.chat_id = str(chat_id)
 
-    def call(self, method, payload=None, timeout=30, resend=True):
+    def call(self, method, payload=None, timeout=30):
+        # Retries, pacing and the circuit breaker live in nobetci.net
         try:
-            return net.request_json(f"https://api.telegram.org/bot{self.token}/{method}",
-                                    payload, timeout=timeout, resend=resend)
+            return net.telegram_api(self.token, method, payload, timeout=timeout)
         except Exception as exc:
             # Never print the URL: it contains the bot token
             print(f"Telegram {method} failed: {type(exc).__name__}: {getattr(exc, 'code', '')}")
@@ -25,7 +25,7 @@ class Telegram:
         }
         if buttons:
             payload["reply_markup"] = {"inline_keyboard": buttons}
-        result = self.call("sendMessage", payload, resend=False)
+        result = self.call("sendMessage", payload)
         if result and result.get("ok"):
             return result["result"]["message_id"]
         return None

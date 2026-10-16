@@ -14,6 +14,7 @@ import sys
 
 SRC = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = "/opt/nobetci/app"
+VENV = "/opt/nobetci/venv"
 CONFIG_DIR = "/etc/nobetci"
 CONFIG = f"{CONFIG_DIR}/config.env"
 LEGACY_CONFIG = "/etc/soc/config.env"
@@ -64,10 +65,29 @@ def install_app():
     run(["chmod", "-R", "go-w", "/opt/nobetci"])
 
 
+def install_venv():
+    """Dependencies go into a root-owned venv, pinned by hash (requirements.txt)."""
+    pip = os.path.join(VENV, "bin", "pip")
+    if not os.path.exists(pip):
+        # Debian/Ubuntu ship venv without ensurepip unless python3-venv is installed
+        if os.path.exists(VENV):
+            shutil.rmtree(VENV)
+        if run([sys.executable, "-m", "venv", VENV]).returncode != 0 or not os.path.exists(pip):
+            if os.path.exists(VENV):
+                shutil.rmtree(VENV)
+            if shutil.which("apt-get"):
+                run(["apt-get", "install", "-y", "-qq", "python3-venv"])
+            run([sys.executable, "-m", "venv", VENV], check=True)
+    run([pip, "install", "--quiet", "--disable-pip-version-check", "--require-hashes", "--no-deps",
+         "--only-binary", ":all:", "-r", os.path.join(APP_DIR, "requirements.txt")], check=True)
+    run(["chmod", "-R", "go-w", VENV])
+
+
 def install_wrapper():
-    # -I: ignore PYTHONPATH and the current directory, so nothing outside /opt/nobetci/app is imported
+    # -I: ignore PYTHONPATH, user site-packages and the current directory;
+    # only /opt/nobetci/app and the venv's pinned packages are importable
     body = ("#!/bin/sh\n"
-            f"exec /usr/bin/python3 -I -c 'import sys; sys.path.insert(0, \"{APP_DIR}\"); "
+            f"exec {VENV}/bin/python -I -c 'import sys; sys.path.insert(0, \"{APP_DIR}\"); "
             "from nobetci.cli import main; sys.exit(main(sys.argv[1:]))' \"$@\"\n")
     with open(WRAPPER, "w") as f:
         f.write(body)
@@ -146,6 +166,7 @@ def main():
 
     step(2, total, f"Installing the code to {APP_DIR}...")
     install_app()
+    install_venv()
     install_wrapper()
 
     step(3, total, "Configuration...")

@@ -1,0 +1,5 @@
+# Runtime dependencies, installed by install.py into /opt/nobetci/venv with
+# pip --require-hashes: a release can only change here, after review.
+nopanic==0.3.0 \
+    --hash=sha256:c53734e9ca3017cbd4944105c17f0db6dc5af31b87e0cda9feba8594f72e8060 \
+    --hash=sha256:3c4b36ed09e147331c1e5ca904897ad4a3e47f26ad2614c8c157c37d83a8c6ca
