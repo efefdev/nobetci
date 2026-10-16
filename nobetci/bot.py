@@ -288,6 +288,8 @@ class Bot:
                 parts.append("Load: " + " ".join(f.read().split()[:3]))
         except OSError:
             pass
+        parts.append("Server facts:")
+        parts += [f"- {fact}" for fact in audit.server_facts(self.config, mask)]
         bans = self.actions.active_bans()
         parts.append(f"Active bans ({len(bans)}):")
         parts += [f"- {mask(b['ip'])} reason={b['reason']} rule={b['rule_id']} since={b['timestamp']} until={b['expiry'] or 'permanent'}"

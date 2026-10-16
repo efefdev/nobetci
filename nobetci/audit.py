@@ -170,3 +170,75 @@ def format_report(findings, t, lang):
         else:
             lines.append(t("audit_bad", title=title, detail=f.detail, fix=f.fix))
     return "\n".join(lines)
+
+
+def _first(cmd, timeout=10):
+    code, out = _run(cmd, timeout)
+    return out.strip() if code == 0 else ""
+
+
+def server_facts(config, mask):
+    """
+    Read-only facts about this server for the AI chat ("which port is SSH on?").
+    Nothing secret: no keys, no config values, and addresses go through mask().
+    """
+    from nobetci import __version__
+    facts = [f"Nöbetçi version: {__version__}"]
+    try:
+        with open("/etc/os-release") as f:
+            pretty = next((l.split("=", 1)[1].strip().strip('"') for l in f if l.startswith("PRETTY_NAME=")), "")
+        facts.append(f"OS: {pretty} (kernel {_first(['uname', '-r'])})")
+    except OSError:
+        pass
+
+    sshd = _sshd()
+    if sshd:
+        ports = [line.split(" ", 1)[1] for line in _first(["sshd", "-T"]).splitlines() if line.startswith("port ")]
+        facts.append(f"SSH: port {', '.join(ports) or sshd.get('port', '?')}, "
+                     f"PasswordAuthentication {sshd.get('passwordauthentication', '?')}, "
+                     f"PermitRootLogin {sshd.get('permitrootlogin', '?')}, "
+                     f"PubkeyAuthentication {sshd.get('pubkeyauthentication', '?')}")
+    else:
+        facts.append("SSH: configuration could not be read (sshd -T failed)")
+
+    listening = []
+    for line in _first(["ss", "-H", "-tlnp"]).splitlines():
+        cols = line.split()
+        if len(cols) >= 4:
+            proc = re.search(r'"([^"]+)"', line)
+            addr = cols[3]
+            if not re.match(r"^(0\.0\.0\.0|\*|\[::\]|127\.|\[::1\])", addr):
+                addr = mask(addr)
+            listening.append(f"{addr}{'/' + proc.group(1) if proc else ''}")
+    if listening:
+        facts.append("Listening TCP: " + ", ".join(sorted(set(listening))))
+
+    ufw = _first(["ufw", "status"])
+    if ufw:
+        facts.append("UFW:\n" + mask("\n".join(ufw.splitlines()[:30])))
+
+    states = []
+    for unit in ("nginx", "ssh", "fail2ban", "nobetci-bot", "nobetci-analyze.timer", "unattended-upgrades"):
+        state = _first(["systemctl", "is-active", unit]) or "unknown"
+        states.append(f"{unit}={state}")
+    facts.append("Services: " + ", ".join(states))
+
+    code, out = _run(["nginx", "-T"], 20)
+    if code == 0:
+        names = sorted({n for m in re.findall(r"^\s*server_name\s+([^;]+);", out, re.M) for n in m.split() if n != "_"})
+        facts.append(f"nginx server names: {', '.join(names[:20]) or '-'}")
+        facts.append(f"nginx ban list included: {firewall.blocklist_included(config['BLOCKLIST_PATH'])}")
+
+    certs = check_certificates()
+    if certs.ok is not None:
+        facts.append(f"SSL certificates expiring within 14 days: {certs.detail or 'none'}")
+
+    disk = _first(["df", "-h", "--output=used,size,pcent", "/"]).splitlines()
+    if len(disk) > 1:
+        facts.append("Disk /: " + " ".join(disk[-1].split()))
+    mem = _first(["free", "-h"]).splitlines()
+    if len(mem) > 1:
+        cols = mem[1].split()
+        facts.append(f"Memory: {cols[2]} used of {cols[1]}")
+    facts.append(f"AI: {config.get('AI_PROVIDER')} models {config.get('AI_MODELS')}")
+    return facts

@@ -160,3 +160,29 @@ class PipelineTest(TempDirMixin, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChatSnapshotTest(TempDirMixin, unittest.TestCase):
+    def test_snapshot_knows_the_ssh_port_and_masks_addresses(self):
+        from nobetci import audit
+        outputs = {
+            "sshd": "port 2222\npasswordauthentication no\npermitrootlogin no\npubkeyauthentication yes\n",
+            "ss": 'LISTEN 0 128 0.0.0.0:2222 0.0.0.0:* users:(("sshd",pid=1,fd=3))\n'
+                  'LISTEN 0 511 45.33.1.2:443 0.0.0.0:* users:(("nginx",pid=2,fd=6))\n',
+            "ufw": "Status: active\n\nTo Action From\n2222/tcp ALLOW 88.12.34.56\n",
+            "systemctl": "active\n",
+        }
+
+        def fake_run(cmd, timeout=20):
+            out = outputs.get(cmd[0])
+            return (0, out) if out is not None else (None, "")
+
+        config = make_config(self.tmp)
+        db.init(config["DB_PATH"])
+        bot = Bot(config)
+        with mock.patch.object(audit, "_run", side_effect=fake_run):
+            snap = bot.snapshot("ssh hangi portta?")
+        self.assertIn("SSH: port 2222", snap)
+        self.assertIn("0.0.0.0:2222/sshd", snap)
+        self.assertNotIn("45.33.1.2", snap)
+        self.assertNotIn("88.12.34.56", snap)
