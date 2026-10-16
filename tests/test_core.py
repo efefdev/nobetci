@@ -177,3 +177,32 @@ class I18nTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetiredModelTest(unittest.TestCase):
+    def load(self, text):
+        import os
+        import tempfile
+        from nobetci.config import load_config
+        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
+            f.write(text)
+        try:
+            return load_config(f.name)
+        finally:
+            os.remove(f.name)
+
+    def test_shut_down_groq_models_are_dropped(self):
+        config = self.load('AI_MODELS="moonshotai/kimi-k2-instruct,llama-3.3-70b-versatile,llama-3.1-8b-instant"\n')
+        self.assertEqual(config.list("AI_MODELS"), ["openai/gpt-oss-120b", "openai/gpt-oss-20b"])
+
+    def test_live_models_are_kept(self):
+        config = self.load('AI_MODELS="llama-3.3-70b-versatile,openai/gpt-oss-20b"\n')
+        self.assertEqual(config.list("AI_MODELS"), ["openai/gpt-oss-20b"])
+
+    def test_other_providers_are_untouched(self):
+        config = self.load('AI_PROVIDER="ollama"\nAI_MODELS="llama-3.1-8b-instant"\n')
+        self.assertEqual(config.list("AI_MODELS"), ["llama-3.1-8b-instant"])
+
+    def test_gpt_oss_gets_low_reasoning(self):
+        self.assertEqual(ai.AI._payload("openai/gpt-oss-20b", [], 10)["reasoning_effort"], "low")
+        self.assertNotIn("reasoning_effort", ai.AI._payload("llama3.2", [], 10))

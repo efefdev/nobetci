@@ -25,7 +25,7 @@ DEFAULTS = {
     "AI_BASE_URL": "",
     "AI_API_KEY": "",
     "GROQ_API_KEY": "",
-    "AI_MODELS": "moonshotai/kimi-k2-instruct,llama-3.3-70b-versatile,llama-3.1-8b-instant",
+    "AI_MODELS": "openai/gpt-oss-120b,openai/gpt-oss-20b",
     "AI_TIME_BUDGET": "75",
     "AI_CHAT": "on",
     # Logs
@@ -42,6 +42,17 @@ DEFAULTS = {
     "CF_ACCOUNT_ID": "",
     # Updates
     "UPDATE_REPO": "efefdev/nobetci",
+}
+
+# Groq models that have been shut down. Old config files may still list them;
+# they are dropped at load time so an upgrade does not leave the AI silent.
+# https://console.groq.com/docs/deprecations
+RETIRED_GROQ_MODELS = {
+    "moonshotai/kimi-k2-instruct", "moonshotai/kimi-k2-instruct-0905",
+    "llama-3.3-70b-versatile", "llama-3.1-8b-instant",
+    "groq/compound", "groq/compound-mini", "qwen/qwen3-32b",
+    "meta-llama/llama-4-scout-17b-16e-instruct", "gemma2-9b-it",
+    "llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768",
 }
 
 PROVIDER_URLS = {
@@ -101,6 +112,11 @@ def load_config(path=None):
     if path:
         with open(path, encoding="utf-8") as f:
             config.update(parse_env(f.read()))
+    if config.get("AI_PROVIDER", "groq") == "groq":
+        models = config.list("AI_MODELS")
+        alive = [m for m in models if m not in RETIRED_GROQ_MODELS]
+        if alive != models:
+            config["AI_MODELS"] = ",".join(alive or DEFAULTS["AI_MODELS"].split(","))
     # 1.x installs kept the database under /var/lib/soc
     if config["DB_PATH"] == DEFAULTS["DB_PATH"] and os.path.exists("/var/lib/soc/soc_logs.db") \
             and not os.path.exists(DEFAULTS["DB_PATH"]):

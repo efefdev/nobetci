@@ -5,7 +5,9 @@ Logs are attacker-controlled text. They are masked, fenced in <logs> tags and
 the model is told they are data, and nothing the model writes can trigger a
 ban by itself: bans only ever come from the rule engine.
 """
+import json
 import re
+import urllib.error
 from datetime import datetime
 
 from nopanic import deadline, time_remaining
@@ -57,6 +59,32 @@ def mask(text):
     return text
 
 
+def describe_error(exc):
+    """Short, admin-readable reason for a failed AI call (never contains the key)."""
+    if isinstance(exc, urllib.error.HTTPError):
+        detail = ""
+        try:
+            body = exc.read().decode(errors="replace")
+            err = json.loads(body).get("error", {})
+            detail = err.get("message", "") if isinstance(err, dict) else str(err)
+        except Exception:
+            pass
+        if exc.code == 401:
+            return "401 invalid API key"
+        if exc.code == 403:
+            return f"403 forbidden {detail}".strip()[:160]
+        if exc.code == 404:
+            return f"404 model not found {detail}".strip()[:160]
+        if exc.code == 429:
+            return "429 rate limited"
+        return f"HTTP {exc.code} {detail}".strip()[:160]
+    if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError):
+        return "timeout"
+    if isinstance(exc, urllib.error.URLError):
+        return f"cannot connect: {exc.reason}"[:160]
+    return f"{type(exc).__name__}: {exc}"[:160]
+
+
 def _defence(text):
     # Logs must not be able to close the fence
     return re.sub(r"</?\s*logs\s*>", "[tag]", text, flags=re.IGNORECASE)
@@ -70,6 +98,7 @@ class AI:
         self.models = config.list("AI_MODELS")
         self.budget = config.int("AI_TIME_BUDGET", 75)
         self.language = LANGUAGES.get(config.get("LANG"), "Turkish")
+        self.last_errors = []   # (model, reason) of the last complete() call
 
     @property
     def enabled(self):
@@ -80,17 +109,15 @@ class AI:
     def complete(self, system, user, max_tokens=1500):
         """Try each model in turn inside one time budget; returns text or None."""
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        self.last_errors = []
         with deadline(self.budget):
             for model in self.models:
                 if time_remaining() <= 1:
                     print(f"AI time budget of {self.budget}s exhausted, skipping remaining models")
+                    self.last_errors.append((model, "time budget exhausted"))
                     break
-                payload = {
-                    "model": model,
-                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.1,
-                }
+                payload = self._payload(model, [{"role": "system", "content": system},
+                                                {"role": "user", "content": user}], max_tokens)
                 try:
                     # Transient errors are retried on the same model (Retry-After aware)
                     reply = net.ai_chat(f"{self.base_url}/chat/completions", payload, headers)
@@ -98,11 +125,42 @@ class AI:
                     content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE).strip()
                     if content:
                         return content
+                    self.last_errors.append((model, "empty answer"))
                 except Exception as exc:
-                    print(f"[{datetime.now()}] AI model {model} failed: {type(exc).__name__} {getattr(exc, 'code', '') or ''}")
-                    if net.is_auth_error(exc):
+                    reason = describe_error(exc)
+                    self.last_errors.append((model, reason))
+                    print(f"[{datetime.now()}] AI model {model} failed: {reason}")
+                    if getattr(exc, "code", None) == 401:
                         break  # every model would reject the same key
         return None
+
+    @staticmethod
+    def _payload(model, messages, max_tokens):
+        payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.1}
+        if model.startswith("openai/gpt-oss"):
+            # Reasoning models: keep the hidden reasoning short so it cannot eat the answer's tokens
+            payload["reasoning_effort"] = "low"
+        return payload
+
+    def error_summary(self):
+        """One line per failed model, for Telegram and the CLI."""
+        if not self.last_errors:
+            return "no model answered"
+        return "; ".join(f"{m}: {r}" for m, r in self.last_errors)
+
+    def probe(self):
+        """Try every model with a tiny request; returns [(model, None | reason)]."""
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        results = []
+        for model in self.models:
+            payload = self._payload(model, [{"role": "user", "content": "Reply with OK"}], 64)
+            try:
+                with deadline(20):
+                    net.ai_chat(f"{self.base_url}/chat/completions", payload, headers, timeout=20)
+                results.append((model, None))
+            except Exception as exc:
+                results.append((model, describe_error(exc)))
+        return results
 
     def analyze(self, logs_text):
         prompt = ANALYZE_TEMPLATE.format(language=self.language, logs=_defence(mask(logs_text)))

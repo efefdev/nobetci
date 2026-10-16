@@ -247,7 +247,7 @@ class Bot:
     def _analyze(self):
         detections, ai_text, threats, alerts = pipeline.run(self.config)
         if ai_text is None and self.ai.enabled and not detections:
-            text = self.t("analyze_failed")
+            text = self.t("analyze_failed", why=pipeline.last_ai_error or "-")
         elif ai_text and threats:
             text = esc(ai_text)
         else:
@@ -336,7 +336,7 @@ class Bot:
         def job():
             self.tg.typing()
             answer = self.ai.chat(text, self.snapshot(text))
-            self.send(esc(answer) if answer else self.t("analyze_failed"))
+            self.send(esc(answer) if answer else self.t("chat_failed", why=self.ai.error_summary()))
         self.background(job)
 
     # DISPATCH

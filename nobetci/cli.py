@@ -92,8 +92,16 @@ def check(config):
         db.init(config["DB_PATH"])
     except OSError as exc:
         problems.append(f"database: {exc}")
-    if not AI(config).enabled:
+    ai = AI(config)
+    if not ai.enabled:
         print("note: AI is off (no API key or models); the rule engine still runs")
+    else:
+        print(f"AI: {config.get('AI_PROVIDER')} at {ai.base_url}")
+        results = ai.probe()
+        for model, reason in results:
+            print(f"  {'ok  ' if reason is None else 'FAIL'} {model}" + (f": {reason}" if reason else ""))
+        if all(reason for _, reason in results):
+            problems.append("no AI model answered; fix AI_API_KEY / AI_MODELS / AI_BASE_URL (rules still run)")
     if firewall.blocklist_included(config["BLOCKLIST_PATH"]) is False:
         problems.append(f"nginx does not include {config['BLOCKLIST_PATH']}: bans would have no effect."
                         f" Add 'include {config['BLOCKLIST_PATH']};' to your server block(s).")
