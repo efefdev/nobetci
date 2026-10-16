@@ -35,3 +35,6 @@ wheels/
 # Logs
 *.log
 /var/log/
+
+# Tests
+.pytest_cache/

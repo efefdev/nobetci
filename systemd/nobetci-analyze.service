@@ -1,0 +1,8 @@
+[Unit]
+Description=Nöbetçi analysis run (rules, bans, AI, alerts)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nobetci analyze
+TimeoutStartSec=170

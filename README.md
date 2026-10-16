@@ -1,323 +1,173 @@
-# SOC AI Telegram Bot - Automated Monitoring & Alert System
-```text
-  ____   ___   ____       _    ___   _____    _                                
- / ___| / _ \ / ___|     / \  |_ _| |_   _|__| | ___  __ _ _ __ __ _ _ __ ___  
- \___ \| | | | |   _____/ _ \  | |    | |/ _ \ |/ _ \/ _` | '__/ _` | '_ ` _ \ 
-  ___) | |_| | |__|_____/ ___ \| |    | |  __/ |  __/ (_| | | | (_| | | | | | |
- |____/ \___/ \____|   /_/   \_\___|  |_|\___|_|\___|\__, |_|  \__,_|_| |_| |_|
-                                                     |___/                     
-```
+# Nöbetçi
 
+**A self-hosted watchman for Linux servers running nginx, controlled from Telegram.**
+[nobetci.efef.dev](https://nobetci.efef.dev) · [Türkçe](#türkçe)
 
-This repository contains a comprehensive, automated Security Operations Center (SOC) framework designed to monitor server activity, detect malicious attempts in real-time, instantly ban attackers via Nginx and system firewalls, and alert administrators via Telegram.
+Nöbetçi reads your nginx, SSH and firewall logs every three minutes. A rule engine catches SSH brute force,
+SQL injection, webshell probes, path traversal, attack tools and hits on trap URLs, and bans the IP in nginx
+(and, optionally, at Cloudflare's edge). An AI layer reviews the same logs for anything the rules miss. You get
+the alerts in Telegram, approve or undo bans with a button, and can simply ask the bot what happened.
+
+It complements fail2ban; it does not replace it.
+
+> Formerly `soc-ai-telegram-bot`. Upgrading from 1.x keeps your config, database and bans; see [Upgrading](#upgrading-from-1x).
 
 ## Features
 
-- **Real-Time Monitoring:** Continuously monitors server resources, SSH logins, sudo activities, Nginx access/error logs, and site availability.
-- **Automated Threat Response:** Detects SQL Injection, XSS, Directory Scanning, Code Injection, and SSH Brute-Force attacks. Unwanted IPs are automatically banned via Nginx deny rules.
-- **Telegram Bot Integration:** Allows you to control your SOC from your Telegram app. Receive real-time alerts and run commands to ban/unban IPs, view logs, get server status, and analyze threats.
-- **Groq API Integration:** Analyzes raw server logs and attack patterns autonomously using AI (LLM integration) to provide actionable insights.
-- **Auto-Ban / Unban Mechanism:** Dynamically maintains ban lists and unbans IPs based on configurable expiration rules.
-- **Whitelist & Cloudflare Support:** Built-in safeguards to prevent banning Cloudflare IP ranges or explicitly whitelisted IP addresses.
+- **Rule engine, per IP.** Every detection knows its source IP. Bans never depend on the AI.
+- **Trap URLs.** Paths no real visitor asks for (`/.env`, `/.git/config` …) ban instantly.
+- **Approval flow.** Lower-confidence detections (XSS, sensitive-file probes, request floods) arrive with
+  *Approve / Reject* buttons. Buttons carry a fixed action (ban an IP for a duration), never a shell command.
+- **Telegram control.** `/status`, `/log`, `/banlist` with per-IP *Unban* buttons, `/ban` with flexible durations
+  (`30m`, `6h`, `7d`, `2w`, `permanent`, or Turkish `1s`, `1g`, `kalici`), *Undo* on every ban, TR/EN messages.
+- **Plain-language chat.** Any message that is not a command goes to the AI, which answers from a read-only
+  snapshot of the server: *"what happened in the last hour?"*, *"why did you ban 45.33.1.2?"*
+- **Your choice of AI.** Groq, a local [Ollama](https://ollama.com) model (nothing leaves the server), or any
+  OpenAI-compatible endpoint. IPs, e-mails, passwords and tokens are masked before logs are sent anywhere.
+- **Prompt-injection aware.** Logs are fenced and marked as untrusted data; nothing the model writes can ban anyone.
+- **`/audit`.** Read-only hardening check: SSH password/root login, UFW, open ports, certificate expiry, pending
+  security updates, `server_tokens`, the nginx ban include, config permissions. Each finding comes with a fix.
+- **Daily report** at 23:55, **automatic unban** when a ban's time is up.
+- **Safe updates.** `/update` moves only between release tags, shows the changes first, asks for approval and
+  can roll back.
+- **No dependencies.** Python 3.10+ standard library only; nothing is installed from PyPI.
 
-## Prerequisites
+## Requirements
 
-- Linux Server (Ubuntu/Debian recommended)
-- `python3` and `pip` (for Python modules)
-- `nginx`
-- `ufw` (for firewall management)
-- `sqlite3`
-- A Telegram Bot (created via BotFather)
-- A Groq API Key (for the LLM-powered log analyzer)
+- Ubuntu 22.04+ / Debian 12+ (systemd, journald), Python 3.10+
+- nginx, ideally UFW
+- A Telegram bot from [@BotFather](https://t.me/BotFather) and your chat ID
+- Optional: a [Groq](https://console.groq.com) API key, a local Ollama, or another OpenAI-compatible endpoint
 
-## Installation Guide
+## Install
 
-1. **Clone the Repository**
 ```bash
-   git clone https://github.com/262efe/soc-ai-telegram-bot.git
-   cd soc-ai-telegram-bot
+git clone https://github.com/efefdev/nobetci.git
+cd nobetci
+sudo python3 install.py
 ```
 
-2. **Setup Configuration**
-   Copy the example environment configuration and fill in your details:
+The installer puts the code in `/opt/nobetci/app`, the `nobetci` command in `/usr/local/bin`, creates
+`/etc/nobetci/config.env` (root only, `0600`) and enables the bot plus three timers. Then:
+
+1. Fill in `/etc/nobetci/config.env` (at least `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SERVER_IP`).
+2. **Include the ban list in nginx**, inside every `server { }` block you want protected:
+   ```nginx
+   include /etc/nginx/snippets/blocked-ips.conf;
+   ```
+   Without this line bans are written but have no effect. `nobetci check` and `/status` warn you.
+3. Optional snippets in `config_templates/`: `block-sensitives.conf` (drops common probes) and
+   `cloudflare-real-ip.conf` (real visitor IPs behind Cloudflare; kept fresh by the weekly
+   `nobetci-cloudflare-ips.timer` if you enable it).
+4. `sudo nobetci check`, then `sudo systemctl restart nobetci-bot` and send `/help` to your bot.
+
+Running the installer again is safe: an existing config is never overwritten, only new settings are appended.
+
+## Commands
+
+| Telegram | CLI | |
+|---|---|---|
+| `/status` | | disk, memory, load, services, nginx include check |
+| `/log [hours]` | | nginx, SSH and UFW summary (max 24 h) |
+| `/banlist` | | active bans with time left and *Unban* buttons |
+| `/ban <ip> [duration] [reason]` | `nobetci ban <ip> [duration] [reason]` | default duration 7 days |
+| `/unban <ip>` | `nobetci unban <ip>` | |
+| `/threats`, `/stats` | | today / last 7 days |
+| `/analyze` | `nobetci analyze` | run an analysis now |
+| `/audit` | `nobetci audit` | hardening audit |
+| `/update` | `nobetci update` | check for a new release |
+| | `nobetci check` | validate the configuration |
+
+The timers run `nobetci analyze` (every 3 min), `nobetci expire` (every 30 min) and `nobetci report` (23:55).
+Change their schedule with `systemctl edit nobetci-analyze.timer`.
+
+## Configuration
+
+Everything lives in `/etc/nobetci/config.env`; see [`config_templates/config.env.example`](config_templates/config.env.example).
+The most useful settings:
+
+- `WHITELIST`: comma-separated IPs or CIDRs that are never banned (your home or office). `SERVER_IP`,
+  Cloudflare ranges and private networks are always protected.
+- `AI_PROVIDER`: `groq`, `ollama` or `openai`; `AI_BASE_URL` for any other OpenAI-compatible endpoint,
+  `AI_MODELS` is the fallback chain. Leave the key empty to run rules only.
+- `TRAP_PATHS` / `TRAP_BAN`: never list a path your site really serves. Not WordPress? Add `/wp-login.php,/xmlrpc.php`.
+- `CF_API_TOKEN` + `CF_ZONE_ID` (or `CF_ACCOUNT_ID`): also block at Cloudflare's edge.
+  The token needs *Zone › Firewall Services › Edit*.
+- `LANG`: `tr` or `en`.
+
+Rules and their ban durations are in [`nobetci/rules.py`](nobetci/rules.py).
+
+## Security model
+
+- The bot answers only `TELEGRAM_CHAT_ID`. Strangers get no reply; you get an hourly summary of who tried.
+  Button presses from any other chat are ignored. In a group chat, every member can press buttons.
+- Telegram can trigger a fixed set of actions only (ban, unban, update, roll back), never a shell command.
+- Logs are attacker-controlled. They are masked, fenced as data, and the AI cannot cause a ban.
+- The config file and database are root-only. Everything runs as root because it edits nginx config.
+- Updates follow release tags, never `main`, and need your approval.
+
+Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
+
+## Upgrading from 1.x
+
+Run `git pull && sudo python3 install.py` in your old clone once. The installer copies `/etc/soc/config.env` to
+`/etc/nobetci/config.env` (your `GROQ_API_KEY` keeps working), keeps using `/var/lib/soc/soc_logs.db`, keeps the
+same nginx ban file, removes the old `soc-*` scripts and the `soc-bot-listener` service, and enables the new timers.
+From then on use `/update`.
+
+## Development
+
 ```bash
-   cp config.env.example config.env
-   nano config.env
-```
-   *Note: Add your Telegram Bot Token, Telegram Chat ID, and Groq API Key.*
-
-3. **Run the Automated Installer**
-   Run the automated script to install project requirements, setup directories, and start background services:
-```bash
-   chmod +x install.py
-   sudo ./install.py
+python3 -m unittest discover -s tests -t .
 ```
 
-![SOC Installation](assets/terminal_screenshot.png)
+The tests need no network, tokens, nginx or root.
 
+## Disclaimer
 
-## Key Files & Structure
+Nöbetçi helps; it does not guarantee security. Try it on a staging server first, keep backups, and keep SSH
+access that does not depend on the web server. You use it at your own risk.
 
-- `core/`: Core database and configuration logic.
-  - `soc_config.py`: Centralized configuration utility for all SOC components.
-  - `soc-db-init.py`: Creates and initializes the database tables.
-  - `soc-db-save.py`: Masks and saves analysis results and threats to the database.
-- `bot/`: Telegram bot logic.
-  - `soc-bot-listener.py`: Telegram Bot logic. Listens for your commands like `/ban`, `/unban`, `/status`, `/threats`, etc.
-  - `soc-notifier.py`: Sends detected threats to Telegram and manages approval/rejection buttons.
-- `engine/`: Log collection and AI analysis logic.
-  - `soc-log-analyzer.py`: Uses AI (Groq API) to read Nginx and kernel logs and generates a human-readable threat intelligence report.
-  - `soc-rule-engine.py`: Defines the attack criteria and automated responses.
-  - `soc-daily-report.py`: Aggregates the daily threat data and sends a summary to your Telegram chat.
-- `actions/`: Automated actions and bans.
-  - `soc-auto-ban.py / soc-auto-unban.py`: Logic to securely block or release IP addresses.
-  - `nginx-ban-ip.py / nginx-unban-ip.py`: Hardened Python scripts for atomic Nginx configuration updates and IP validation.
-- `scripts/`: Helper scripts.
-  - `soc-update.py`: Automatic updater script.
-  - `update-cloudflare-ips.py`: Automatically synchronizes Cloudflare IPs.
-- `config_templates/`: Configuration snippets.
-  - `block-sensitives.conf & cloudflare-real-ip.conf`: Production-ready Nginx configuration snippets.
-  - `config.env.example`: Environmental variable template.
-  - `soc-bot-listener.service`: Systemd service file.
-
-## Telegram Bot Commands
-
-- `/log <hours>` - Displays the log summary (Nginx, SSH, UFW) of the last X hours (e.g., `/log 2`)
-- `/status` - Shows real-time system CPU, RAM, disk usage, and background service status
-- `/banlist` - Lists the currently banned IPs and recent ban logs
-- `/ban <ip> <duration> <reason>` - Bans the given IP temporarily or permanently (`1s`, `1g`, `7g`, `kalici`)
-- `/unban <ip>` - Removes an IP ban from the Nginx firewall
-- `/threats` - Lists today's detected and blocked threat history
-- `/analyze` - Instantly triggers a manual deep analysis of server logs using the Groq LLM API
-- `/stats` - Presents security statistics for the last 7 days
-- `/help` - Displays the command help menu
-
-## Customization
-
-- Adjust rule severities and ban durations in `soc-rule-engine.py` to tune the system for your environment.
-
-## Privacy & Security
-
-IP addresses, email addresses, passwords and Bearer tokens are automatically masked before being sent to the Groq API.
-
-> ⚠️ Each user must create their own Groq API key.
-> Never share or transfer your API keys to others.
-
-## How Is This Different From Fail2ban?
-
-Fail2ban operates on static rules and only recognizes known attack patterns. This system goes further by:
-
-- **AI-powered log analysis** to detect unknown and emerging threats
-- **Real-time Telegram notifications** so you're always in the loop
-- **Approval mechanism** to prevent false positives — it asks before banning
-- **Daily summary reports** giving you a full picture of your security posture
-- Can be used alongside Fail2ban — they complement, not replace each other
-
-## Frequently Asked Questions (FAQ)
-
-**What if my bot token gets stolen?**
-The bot only responds to the chat ID defined in `config.env`.
-Even if someone obtains the token, they cannot execute any commands.
-
-**What happens if the Groq API goes down?**
-The rule engine operates independently of AI. Critical threats are automatically banned even without AI analysis.
-
-**What if I accidentally ban my own IP?**
-The whitelist mechanism automatically protects your server's IP.
-You can also remove any ban manually using the `/unban <ip>` command.
-
-**Is Cloudflare required?**
-No, the system works without Cloudflare. `cloudflare-real-ip.conf` is entirely optional.
-
-**Is Groq free?**
-Yes, the free tier allows hundreds of analyses per day.
-Each user can create their own free API key at [console.groq.com](https://console.groq.com).
-
-**Is the database secure? Does it contain sensitive information?**
-The database is stored as an unencrypted SQLite file, but it contains no raw log data. Only masked threat analyses, ban history, and statistics are stored. All personal data including IP addresses is masked before being written to the database. File permissions should be set to `root:root 600` so that only the root user can access it.
-
-
-
-## Contact
-
-Feel free to reach out for any issues, suggestions, or contributions:
-
-- 🌐 Website: [efealtintas.com](https://efealtintas.com)
-- 📧 Email: [hi@efealtintas.com](mailto:hi@efealtintas.com)
-
-## ⚠️ Disclaimer
-
-This software is developed to **assist** with server security; it does not guarantee complete protection. The **user assumes full responsibility** for any damages arising from the use of this software, including but not limited to data loss, security breaches, or system outages.
-
-- Test in a staging environment before deploying to production
-- Take regular backups
-- This tool is not a substitute for professional security consulting
-
-## License
-
-MIT License.
-
-
-
-# SOC AI Telegram Bot - Otomatik İzleme ve Uyarı Sistemi
-```text
-  ____   ___   ____       _    ___   _____    _                                
- / ___| / _ \ / ___|     / \  |_ _| |_   _|__| | ___  __ _ _ __ __ _ _ __ ___  
- \___ \| | | | |   _____/ _ \  | |    | |/ _ \ |/ _ \/ _` | '__/ _` | '_ ` _ \ 
-  ___) | |_| | |__|_____/ ___ \| |    | |  __/ |  __/ (_| | | | (_| | | | | | |
- |____/ \___/ \____|   /_/   \_\___|  |_|\___|_|\___|\__, |_|  \__,_|_| |_| |_|
-                                                     |___/                     
-```
-
-
-Bu depo, sunucu etkinliklerini izlemek, kötü niyetli girişimleri gerçek zamanlı olarak tespit etmek, saldırganları Nginx ve sistem güvenlik duvarları aracılığıyla anında engellemek ve yöneticileri Telegram üzerinden uyarmak için tasarlanmış kapsamlı, otomatik bir Güvenlik Operasyon Merkezi (SOC) yapısı içerir.
-
-## Özellikler
-
-- **Gerçek Zamanlı İzleme:** Sunucu kaynaklarını, SSH girişlerini, sudo etkinliklerini, Nginx erişim/hata loglarını ve site erişilebilirliğini sürekli olarak izler.
-- **Otomatik Tehdit Yanıtı:** SQL Injection, XSS, Dizin Tarama, Kod Enjeksiyonu ve SSH Brute-Force saldırılarını tespit eder. İstenmeyen IP'ler, Nginx deny kuralları aracılığıyla otomatik olarak engellenir (banlanır).
-- **Telegram Bot Entegrasyonu:** SOC sisteminizi Telegram uygulamanızdan yönetmenizi sağlar. Gerçek zamanlı uyarılar alın ve IP banlama/ban kaldırma, logları görüntüleme, sunucu durumunu öğrenme ve tehditleri analiz etme komutlarını çalıştırın.
-- **Groq API Entegrasyonu:** Tehdit raporları sağlamak için yapay zeka (LLM entegrasyonu) kullanarak ham sunucu loglarını ve saldırı modellerini otonom olarak analiz eder.
-- **Otomatik Ban / Ban Kaldırma Mekanizması:** Ban listelerini dinamik olarak yönetir ve yapılandırılabilir süre kurallarına göre IP'lerin yasaklarını otomatik olarak kaldırır.
-- **Beyaz Liste (Whitelist) & Cloudflare Desteği:** Cloudflare IP aralıklarının veya açıkça beyaz listeye alınmış IP adreslerinin yanlışlıkla engellenmesini önlemek için yerleşik korumalar.
-
-## Gereksinimler
-
-- Linux Sunucu (Ubuntu/Debian önerilir)
-- `python3` ve `pip` (Python modülleri için)
-- `nginx`
-- `ufw` (güvenlik duvarı yönetimi için)
-- `sqlite3`
-- Bir Telegram Botu (BotFather üzerinden oluşturulmuş)
-- Bir Groq API Anahtarı (Yapay zeka analizörü için)
-
-## Kurulum Rehberi
-
-1. **Projeyi Klonlayın**
-```bash
-   git clone https://github.com/262efe/soc-ai-telegram-bot.git
-   cd soc-ai-telegram-bot
-```
-
-2. **Konfigürasyonu Ayarlayın**
-   Örnek çevre değişkenleri konfigürasyonunu kopyalayın ve kendi bilgilerinizi doldurun:
-```bash
-   cp config.env.example config.env
-   nano config.env
-```
-   *Not: Telegram Bot Token'ınızı, Telegram Chat ID'nizi ve Groq API Key'inizi ekleyin.*
-
-3. **Otomatik Kurulum Scriptini Çalıştırın**
-   Projenin gereksinimlerini kurmak, dizinlerini ayarlamak ve arka plan servislerini başlatmak için otomatik scripti çalıştırın:
-```bash
-   chmod +x install.py
-   sudo ./install.py
-```
-
-![SOC Kurulumu](assets/terminal_screenshot.png)
-
-
-## Önemli Dosyalar ve Yapı
-
-- `core/`: Veritabanı ve yapılandırma dosyaları.
-  - `soc_config.py`: Tüm SOC bileşenleri için merkezi yapılandırma aracıdır.
-  - `soc-db-init.py`: Veritabanı tablolarını oluşturur ve başlatır.
-  - `soc-db-save.py`: Analiz sonuçlarını ve tehditleri maskeleyerek veritabanına kaydeder.
-- `bot/`: Telegram bot yönetim mantığı.
-  - `soc-bot-listener.py`: Telegram Bot mantığıdır. `/ban`, `/unban`, `/status`, `/threats` gibi komutlarınızı dinler ve uygular.
-  - `soc-notifier.py`: Tespit edilen tehditleri Telegram'a gönderir ve onay/ret butonlarını yönetir.
-- `engine/`: Log analiz ve yapay zeka entegrasyonu.
-  - `soc-log-analyzer.py`: Nginx ve kernel loglarını okumak için yapay zeka (Groq API) kullanır ve okunabilir bir tehdit raporu oluşturur.
-  - `soc-rule-engine.py`: Saldırı kriterlerini ve bunlara verilecek otomatik tepkileri tanımlar.
-  - `soc-daily-report.py`: Günlük tehdit verilerini toplayıp özet olarak Telegram sohbetinize gönderir.
-- `actions/`: Otomatik işlem ve engelleme süreçleri.
-  - `soc-auto-ban.py / soc-auto-unban.py`: IP adreslerini güvenli bir şekilde engelleme veya serbest bırakma mekanizmasıdır.
-  - `nginx-ban-ip.py / nginx-unban-ip.py`: Atomik Nginx konfigürasyon güncellemeleri ve IP doğrulaması yapan sertleştirilmiş Python betikleridir.
-- `scripts/`: Yardımcı araçlar ve otomasyon betikleri.
-  - `soc-update.py`: Sistemin Github üzerinden otomatik güncellenmesini sağlayan betik.
-  - `update-cloudflare-ips.py`: Cloudflare IP aralıklarını senkronize eden betik.
-- `config_templates/`: Yapılandırma taslakları.
-  - `block-sensitives.conf & cloudflare-real-ip.conf`: Üretime hazır Nginx konfigürasyon parçacıklarıdır.
-  - `config.env.example`: Çevre değişkenleri örnek şablonu.
-  - `soc-bot-listener.service`: Systemd servis dosyası.
-
-## Telegram Bot Komutları
-
-Bot üzerinden kullanabileceğiniz komutlar şunlardır:
-
-- `/log <saat>` - Son X saatin Nginx, SSH ve UFW log özetini gösterir (Örn: `/log 2`)
-- `/status` - Sistem CPU, RAM, disk kullanımı ve arka plan servislerinin güncel durumunu gösterir
-- `/banlist` - Aktif engellenmiş (banlı) IP listesini ve son ban kayıtlarını listeler
-- `/ban <ip> <süre> <sebep>` - Belirtilen IP adresini kalıcı veya geçici (`1s`, `1g`, `7g`, `kalici`) olarak banlar (Örn: `/ban 1.2.3.4 7g brute_force`)
-- `/unban <ip>` - Nginx güvenlik duvarındaki bir IP yasaklamasını kaldırır
-- `/threats` - Bugün tespit edilen ve engellenen tehditlerin dökümünü listeler
-- `/analyze` - Groq LLM API ile sunucu loglarının manuel derin analizini anında başlatır
-- `/stats` - Son 7 günün güvenlik istatistiklerini (Kritik, Yüksek, Orta seviyeli tehditler vb.) sunar
-- `/help` - Komut yardım menüsünü görüntüler
-
-## Özelleştirme
-
-- Ortamınızın ihtiyaçlarına göre ayarlamalar yapmak için `soc-rule-engine.py` içindeki kuralları ve ban sürelerini değiştirebilirsiniz.
-
-## Gizlilik & Güvenlik
-
-IP adresleri, e-posta adresleri, şifreler ve Bearer token'lar Groq API'ye gönderilmeden önce otomatik olarak maskelenir.
-
-> ⚠️ Her kullanıcı kendi Groq API anahtarını oluşturmalıdır.
-> API anahtarlarını paylaşmayın veya başkalarına devretmeyin.
-
-## Fail2ban'dan Farkı Nedir?
-
-Fail2ban kural tabanlı çalışır ve sadece bilinen saldırı kalıplarını tanır. Bu sistem ise:
-
-- **Yapay zeka ile log analizi** yaparak bilinmeyen tehditleri de tespit eder
-- **Telegram üzerinden gerçek zamanlı bildirim** gönderir
-- **Onay mekanizması** ile yanlış pozitifleri önler — ban atmadan önce size sorar
-- **Günlük özet rapor** ile genel güvenlik durumunu sunar
-- Fail2ban ile birlikte kullanılabilir, birbirinin alternatifi değildir
-
-## Sık Sorulan Sorular (SSS)
-
-**Bot token çalınırsa ne olur?**
-Bot sadece `config.env`'de tanımlı chat ID'ye yanıt verir.
-Başka biri token'ı ele geçirse bile komut çalıştıramaz.
-
-**Groq API çökerse ne olur?**
-Kural motoru AI'dan bağımsız çalışır. Kritik tehditler AI olmadan da otomatik banlanır.
-
-**Yanlışlıkla kendi IP'mi banlarsam?**
-Whitelist mekanizması var, kendi sunucu IP'niz otomatik korunur.
-Manuel `/unban <ip>` komutu ile de ban kaldırılabilir.
-
-**Cloudflare zorunlu mu?**
-Hayır, Cloudflare olmadan da çalışır. `cloudflare-real-ip.conf` opsiyoneldir.
-
-**Groq ücretsiz mi?**
-Evet, free tier ile günlük yüzlerce analiz yapabilirsiniz.
-Her kullanıcı [console.groq.com](https://console.groq.com) adresinden kendi ücretsiz API anahtarını oluşturabilir.
-
-**Veritabanı güvenli mi, içinde hassas bilgi var mı?**
-Veritabanı şifrelenmemiş SQLite formatında saklanır ancak içinde ham log verisi bulunmaz. Yalnızca maskelenmiş tehdit analizleri, ban geçmişi ve istatistikler tutulur. IP adresleri dahil tüm kişisel veriler veritabanına yazılmadan önce maskelenir. Dosya izinleri `root:root 600` olarak ayarlanmalı, yalnızca root kullanıcısı erişebilmelidir.
-
-
-
-## İletişim
-
-Herhangi bir sorun, öneri veya katkı için benimle iletişime geçebilirsiniz:
-
-- 🌐 Website: [efealtintas.com](https://efealtintas.com)
-- 📧 E-posta: [hi@efealtintas.com](mailto:hi@efealtintas.com)
-
-## ⚠️ Sorumluluk Reddi
-
-Bu yazılım, sunucu güvenliğinizi **desteklemek** amacıyla geliştirilmiştir; tam güvenlik garantisi vermez. Yazılımın kullanımından doğabilecek veri kayıpları, güvenlik ihlalleri veya sistem kesintileri dahil tüm zararlardan **kullanıcı sorumludur**.
-
-- Canlı ortamda kullanmadan önce test ortamında deneyiniz
-- Düzenli yedek alınız
-- Bu araç, profesyonel güvenlik danışmanlığının yerini tutmaz
-
-## Lisans
-
-MIT License.
+Contact: [efealtintas.com](https://efealtintas.com) · [hi@efealtintas.com](mailto:hi@efealtintas.com) · License: MIT
 
 ---
+
+## Türkçe
+
+**Nöbetçi**, nginx çalıştıran Linux sunucular için kendi sunucunda çalışan, Telegram'dan yönetilen bir nöbetçi.
+
+Üç dakikada bir nginx, SSH ve güvenlik duvarı loglarını okur. Kural motoru SSH kaba kuvvet denemelerini,
+SQL injection'ı, webshell aramalarını, dizin geçişini, saldırı araçlarını ve tuzak URL'lere gelen istekleri
+yakalar, IP'yi nginx'te (istersen Cloudflare'in kenarında da) banlar. Yapay zeka katmanı kuralların
+kaçırdıklarına bakar. Uyarılar Telegram'a gelir; banı butonla onaylar ya da geri alırsın, bota ne olduğunu da
+düz Türkçe sorabilirsin. fail2ban'in yerine değil, yanında çalışır.
+
+**Öne çıkanlar:** IP bazlı kural motoru · tuzak URL'ler · Onayla/Reddet butonları (butonlar komut değil sabit
+eylem taşır) · `/banlist`'te IP başına *Kaldır*, her banda *Geri al* · esnek süreler (`30dk`, `6s`, `7g`, `2hf`,
+`kalici`) · komut dışındaki mesajlara yapay zekanın salt okunur cevabı · Groq, yerel Ollama ya da OpenAI uyumlu
+uç nokta · loglar dışarı çıkmadan maskelenir · `/audit` sertleştirme denetimi · günlük rapor ve otomatik ban
+kaldırma · yalnızca etiketli sürümlere, onayla ve geri alınabilir güncelleme · sıfır dış bağımlılık.
+
+### Kurulum
+
+```bash
+git clone https://github.com/efefdev/nobetci.git
+cd nobetci
+sudo python3 install.py
+```
+
+1. `/etc/nobetci/config.env` dosyasını doldur (en az `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SERVER_IP`).
+2. **Ban listesini nginx'e dahil et.** Korumak istediğin her `server { }` bloğuna ekle:
+   `include /etc/nginx/snippets/blocked-ips.conf;` Bu satır yoksa banlar dosyaya yazılır ama işe yaramaz;
+   `nobetci check` ve `/status` seni uyarır.
+3. `sudo nobetci check`, ardından bota `/help` yaz.
+
+Kurulumu tekrar çalıştırmak güvenli: mevcut config'in üzerine yazılmaz, yalnızca yeni ayarlar eklenir.
+
+**1.x'ten geçiş:** eski klonunda bir kez `git pull && sudo python3 install.py` çalıştır. Config, veritabanı ve
+banlar korunur, eski `soc-*` betikleri ve servis kaldırılır. Sonrasında güncellemeler için `/update` kullan.
+
+### Sorumluluk reddi
+
+Nöbetçi güvenliğe yardım eder, garanti vermez. Önce test sunucusunda dene, yedek al, web sunucusuna bağlı
+olmayan bir SSH erişimin olsun. Kullanım sorumluluğu sana aittir.
