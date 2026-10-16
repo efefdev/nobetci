@@ -1,0 +1,13 @@
+[Unit]
+Description=Nöbetçi Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nobetci listen
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
