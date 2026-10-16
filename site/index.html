@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Nöbetçi — Sunucun uyurken, biri nöbette.</title>
+  <meta name="description" content="Nöbetçi; nginx çalışan Linux sunucun için kendi barındırdığın bir bekçi. Logları okur, saldırıları yakalar, IP'leri banlar ve Telegram'dan sana sorar. Açık kaynak, MIT.">
+  <meta name="theme-color" content="#000000">
+  <link rel="canonical" href="https://nobetci.efef.dev/">
+  <link rel="icon" href="img/nobetci-logo.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://nobetci.efef.dev/">
+  <meta property="og:title" content="Nöbetçi — Sunucun uyurken, biri nöbette.">
+  <meta property="og:description" content="nginx sunucun için kendi barındırdığın bekçi: kural motoru, yapay zekâ özeti ve Telegram'dan onay. Açık kaynak, MIT.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="nav" id="nav">
+    <div class="nav-in">
+      <a class="brand" href="#ust" aria-label="Nöbetçi, başa dön"><img src="img/nobetci-logo.svg" alt="" width="22" height="22">Nöbetçi</a>
+      <nav aria-label="Bölümler">
+        <a href="#nasil">Nasıl çalışır</a>
+        <a href="#yapay-zeka">Yapay zekâ</a>
+        <a href="#telegram"><span lang="en">Telegram</span></a>
+        <a href="#guvenlik">Güvenlik</a>
+      </nav>
+      <a class="nav-btn" href="#kurulum">Kur</a>
+    </div>
+  </header>
+
+  <main id="ust">
+    <!-- 1. GİRİŞ -->
+    <section class="hero">
+      <div class="hero-copy">
+        <img class="hero-icon" src="img/nobetci-logo.svg" alt="Nöbetçi logosu" width="112" height="112">
+        <h1>Sunucun uyurken, <br class="br-m"><span class="glow-text nowrap">biri nöbette.</span></h1>
+        <p class="hero-sub">nginx çalışan Linux sunucun için kendi barındırdığın bir bekçi.
+          Logları okur, saldırıyı yakalar, <span class="nowrap">sana <span lang="en">Telegram</span>'dan sorar.</span></p>
+        <p class="links">
+          <a class="link-fire" href="#kurulum">Kur ve başla <span aria-hidden="true">›</span></a>
+          <a class="link" href="https://github.com/efefdev/nobetci" rel="noopener">GitHub'da incele <span aria-hidden="true">›</span></a>
+        </p>
+      </div>
+
+      <div class="stage">
+        <div class="stage-light" aria-hidden="true"></div>
+        <div class="tg" id="tg" role="img" aria-label="Örnek Telegram konuşması: Nöbetçi bir hassas dosya taramasını bildirir, onay ister; ardından son bir saatin özetini verir.">
+          <div class="tg-head" aria-hidden="true">
+            <img src="img/nobetci-logo.svg" alt="" width="36" height="36">
+            <div><b>Nöbetçi</b><small>bot</small></div>
+          </div>
+          <div class="tg-body" aria-hidden="true">
+            <div class="msg bot">
+              <p class="msg-title"><span class="dot warn"></span>Hassas dosya taraması</p>
+              <p class="kv"><span>IP</span><code>203.0.113.47</code></p>
+              <p class="kv"><span>İstek</span><code>6 istek · 3 dk</code></p>
+              <p class="kv"><span>Örnek</span><code>/.git/HEAD</code></p>
+              <p class="kv"><span>Öneri</span><code>7 gün ban</code></p>
+              <time>03:12</time>
+            </div>
+            <div class="keys">
+              <span class="key is-pressed">Onayla</span>
+              <span class="key">Reddet</span>
+            </div>
+            <p class="sys">Onaylandı · 203.0.113.47 nginx'te 7 gün banlandı</p>
+
+            <div class="msg me">
+              <p>son bir saatte ne oldu?</p>
+              <time>08:40</time>
+            </div>
+
+            <div class="msg bot">
+              <p>Son bir saatte 2.184 istek geldi. Kural motoru 2 IP'yi banladı:</p>
+              <p class="li"><code>198.51.100.12</code> tuzak adres <code>/.env</code></p>
+              <p class="li"><code>198.51.100.73</code> 41 başarısız SSH girişi</p>
+              <p>Bunun dışında olağandışı bir şey görmedim; hata oranı her zamanki gibi.</p>
+              <time>08:40</time>
+            </div>
+            <div class="keys">
+              <span class="key">Ban kaldır · 198.51.100.12</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. NASIL ÇALIŞIR -->
+    <section class="statement" id="nasil">
+      <p class="eyebrow">Nasıl çalışır</p>
+      <h2 class="big">Önce kurallar.<br><span class="dim">Sonra yapay zekâ.</span></h2>
+      <p class="statement-sub">Nöbetçi birkaç dakikada bir nginx, SSH ve UFW loglarını okur. Bilinen saldırı kalıplarını
+        kural motoru yakalar; IP'yi nginx'te, istersen Cloudflare'in kenarında da banlar.</p>
+
+      <dl class="numbers">
+        <div><dt>Okur</dt><dd>nginx erişim ve hata logları, SSH girişleri, UFW kayıtları.</dd></div>
+        <div><dt>Yakalar</dt><dd>SSH kaba kuvvet, SQL enjeksiyonu, webshell ve dizin aşma denemeleri, saldırı araçları, tuzak adresler.</dd></div>
+        <div><dt>Banlar</dt><dd>nginx'te; istersen Cloudflare'de de. Ne zaman ve neden olduğunu sana yazar.</dd></div>
+      </dl>
+
+      <div class="log-line" aria-hidden="true">
+        <span class="ll-req" id="llReq">203.0.113.9 GET /wp-admin/ · sqlmap/1.8</span>
+        <span class="ll-arrow">→</span>
+        <span class="ll-out" id="llOut">saldırı aracı · banlandı</span>
+      </div>
+    </section>
+
+    <!-- 3. YAPAY ZEKÂ -->
+    <section class="statement" id="yapay-zeka">
+      <p class="eyebrow">Yapay zekâ</p>
+      <h2 class="big">Logları okur.<br><span class="dim">Sırlarını değil.</span></h2>
+      <p class="statement-sub">Kuralların kaçırabileceği şeyler için bir yapay zekâ katmanı logları özetler ve olağandışı
+        olanı işaretler. Loglar sunucudan çıkmadan önce IP'ler, e-postalar, parolalar ve anahtarlar maskelenir.
+        Yerel bir Ollama modeliyle hiçbir şey sunucudan çıkmaz.</p>
+
+      <div class="mask" aria-hidden="true">
+        <p><span class="m-k">from</span> <s>198.51.100.24</s><b>[ip]</b> <span class="m-k">user</span> <s>deniz@ornek.com</s><b>[e-posta]</b></p>
+        <p><span class="m-k">POST</span> /giris <span class="m-k">password=</span><s>hunter2</s><b>[gizli]</b> <span class="m-k">token=</span><s>eyJhbGciOi…</s><b>[gizli]</b></p>
+      </div>
+
+      <ul class="facts">
+        <li><b><span lang="en">Groq</span></b><span>bulutta hızlı yanıt veren seçenek</span></li>
+        <li><b><span lang="en">Ollama</span></b><span>kendi makinende çalışan yerel model; veri dışarı çıkmaz</span></li>
+        <li><b>OpenAI uyumlu</b><span>aynı arayüzü konuşan herhangi bir uç nokta</span></li>
+      </ul>
+    </section>
+
+    <!-- 4. TELEGRAM -->
+    <section class="statement" id="telegram">
+      <p class="eyebrow"><span lang="en">Telegram</span></p>
+      <h2 class="big">Panel yok.<br><span class="dim">Sohbet var.</span></h2>
+      <p class="statement-sub">Uyarılar cebine gelir, kararı sen verirsin. Bot yalnızca ban ve ban kaldırma gibi sabit bir
+        eylem kümesini çalıştırır; asla rastgele bir kabuk komutu değil.</p>
+
+      <ul class="facts wide">
+        <li><b>Onayla ya da reddet</b><span>uyarılar karar düğmeleriyle gelir; bot senin onayını bekler</span></li>
+        <li><b>Tek dokunuşla geri al</b><span>her banlanan IP'nin yanında bir “Ban kaldır” düğmesi</span></li>
+        <li><b>Düz Türkçe sor</b><span>“son bir saatte ne oldu?”, “bu IP'yi neden banladın?” salt okunur verilerle yanıtlanır</span></li>
+        <li><b>Günlük rapor</b><span>her gün tek mesajda özet</span></li>
+        <li><b>Türkçe ve İngilizce</b><span>mesajlar iki dilde</span></li>
+        <li><b><code>/audit</code></b><span>sunucu sıkılaştırma denetimi, puan ve nasıl düzeltileceği</span></li>
+      </ul>
+
+      <div class="audit" aria-label="Örnek /audit çıktısı">
+        <div class="audit-score"><span class="count" data-to="4">4</span><small>/ 7</small></div>
+        <ul>
+          <li class="ok">SSH parola ile giriş kapalı</li>
+          <li class="bad">SSH root girişi açık <em>PermitRootLogin no</em></li>
+          <li class="ok">UFW etkin</li>
+          <li class="ok">Açık portlar: 22, 80, 443</li>
+          <li class="ok">SSL sertifikası 61 gün geçerli</li>
+          <li class="bad">4 güvenlik güncellemesi bekliyor <em>apt upgrade</em></li>
+          <li class="bad">nginx sürümünü gösteriyor <em>server_tokens off</em></li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 5. GÜVENLİK -->
+    <section class="wipe" id="guvenlik">
+      <div class="wipe-copy">
+        <p class="eyebrow">Güvenlik</p>
+        <h2 class="big">Yalnızca sana cevap verir.<br><span class="dim">Yabancılara sessiz.</span></h2>
+        <p class="statement-sub">Bot yalnızca senin sohbet kimliğini dinler; başka biri yazarsa yanıt bile vermez.
+          Bir bekçinin kendisi de korunmalı.</p>
+      </div>
+      <ul class="facts">
+        <li><b>Asla banlanmaz</b><span>beyaz liste, Cloudflare adresleri ve özel ağ aralıkları</span></li>
+        <li><b><code>600</code></b><span>yapılandırma dosyası yalnızca root tarafından okunur</span></li>
+        <li><b>Etiketli sürümler</b><span>güncelleme yalnızca sürüm etiketlerine; önce değişiklik listesi ve senin onayın, gerekirse geri alma</span></li>
+      </ul>
+    </section>
+
+    <!-- 6. FAIL2BAN -->
+    <section class="systems" id="fail2ban">
+      <p class="eyebrow">fail2ban</p>
+      <h2 class="big">Yerine değil. <span class="dim">Yanında.</span></h2>
+      <p class="statement-sub center">fail2ban işini iyi yapar; Nöbetçi onunla birlikte çalışabilir.
+        Üstüne yapay zekâ incelemesi, <span lang="en">Telegram</span>'dan yönetim, onay akışı ve sunucu denetimi ekler.</p>
+      <p class="caption">kurallar · yapay zekâ özeti · onay · /audit</p>
+    </section>
+
+    <!-- 7. KURULUM -->
+    <section class="install" id="kurulum">
+      <h2 class="big">Nöbeti devral.</h2>
+      <div class="install-grid">
+        <div class="cmd">
+          <p class="cmd-os">1. Kur <small>Ubuntu / Debian · nginx · Python 3.10+</small></p>
+          <pre><code>git clone https://github.com/efefdev/nobetci
+cd nobetci
+sudo python3 install.py</code></pre>
+          <button class="copy" data-copy="git clone https://github.com/efefdev/nobetci && cd nobetci && sudo python3 install.py">Kopyala</button>
+        </div>
+        <div class="cmd">
+          <p class="cmd-os">2. Ayarla <small>bot anahtarı, sohbet kimliği, model</small></p>
+          <pre><code>sudo nano /etc/nobetci/config.env</code></pre>
+          <button class="copy" data-copy="sudo nano /etc/nobetci/config.env">Kopyala</button>
+        </div>
+      </div>
+      <p class="fine">Nöbetçi bir yardımcıdır, garanti değil. Her saldırıyı yakalayamaz, yapay zekâ yanılabilir;
+        yedeklerini, güncellemelerini ve kendi gözetimini bırakma. Bir açık bulursan
+        <a href="https://github.com/efefdev/nobetci/blob/main/SECURITY.md" rel="noopener">bildir</a>.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-in">
+      <a class="brand" href="#ust"><img src="img/nobetci-logo.svg" alt="" width="22" height="22">Nöbetçi</a>
+      <p>Açık kaynak · <a href="https://github.com/efefdev/nobetci/blob/main/LICENSE" rel="noopener">MIT lisansı</a> · olduğu gibi sunulur, garanti verilmez</p>
+      <p class="footer-links"><a href="https://github.com/efefdev/nobetci" rel="noopener">GitHub</a><a href="https://efef.dev" rel="noopener">efef.dev</a></p>
+    </div>
+  </footer>
+
+  <script src="main.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Nöbetçi analysis every 3 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

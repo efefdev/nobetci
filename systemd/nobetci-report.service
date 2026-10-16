@@ -1,0 +1,7 @@
+[Unit]
+Description=Nöbetçi daily report
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nobetci report

@@ -1,0 +1,17 @@
+[project]
+name = "nobetci"
+dynamic = ["version"]
+description = "Self-hosted watchman for Linux servers running nginx, controlled from Telegram"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+exclude = ["site"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+ignore = ["E501", "E741"]

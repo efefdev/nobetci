@@ -1,0 +1,6 @@
+[Unit]
+Description=Nöbetçi: lift expired bans
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nobetci expire

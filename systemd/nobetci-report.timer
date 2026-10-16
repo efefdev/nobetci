@@ -1,0 +1,9 @@
+[Unit]
+Description=Send the Nöbetçi daily report at 23:55
+
+[Timer]
+OnCalendar=*-*-* 23:55:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
