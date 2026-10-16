@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Dependencies (hash-pinned)
-        run: pip install --require-hashes --no-deps --only-binary :all: -r requirements.txt
+        run: pip install --require-hashes --no-deps --only-binary ":all:" -r requirements.txt
       - name: Tests
         run: python -m unittest discover -s tests -t . -v
 
