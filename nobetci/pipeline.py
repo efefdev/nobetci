@@ -16,6 +16,7 @@ from nobetci.i18n import SEVERITY_EMOJI, esc, translator
 from nobetci.telegram import Telegram, button
 
 AI_WARN_EVERY = 1800
+last_ai_error = ""  # why the AI failed in the last run(), for /analyze
 
 
 def save_detections(conn, detections):
@@ -103,13 +104,16 @@ def _run(config, quiet):
             text = head + "\n\n" + t("alert_proposal", ip=d.ip, d=humanize(d.ban, t))
             alerts.append((text, [[button(t("btn_approve"), f"ok:{pending}"), button(t("btn_reject"), f"no:{pending}")]]))
 
+    global last_ai_error
     ai = ai_mod.AI(config)
     ai_text, threats = None, []
+    last_ai_error = ""
     if ai.enabled and (batch.access or batch.auth or batch.error or batch.warnings):
         ai_text = ai.analyze(logs.ai_view(batch, ai_mod.mask))
         if ai_text is None:
+            last_ai_error = ai.error_summary()
             if not quiet and _ai_warning_due(config["STATE_DIR"]):
-                tg.send(t("warn_ai"))
+                tg.send(t("warn_ai", why=ai.error_summary()))
         else:
             threats = ai_mod.parse_threats(ai_text)
             for th in threats:

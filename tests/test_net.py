@@ -181,3 +181,51 @@ class GenericTest(NetTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AIErrorReportingTest(NetTestCase):
+    def test_chat_failure_tells_the_admin_why(self):
+        from nobetci import db
+        from nobetci.bot import Bot
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            config = make_config(tmp, AI_API_KEY="bad", AI_MODELS="m1,m2")
+            db.init(config["DB_PATH"])
+            bot = Bot(config)
+            sent = []
+            bot.tg = mock.Mock()
+            bot.tg.send.side_effect = lambda text, buttons=None: sent.append(text)
+            self.fake(http_error(401, json.dumps({"error": {"message": "Invalid API Key"}}).encode()))
+            with testing.instant():
+                bot.chat("son bir saatte ne oldu?")
+                for _ in range(50):
+                    if sent:
+                        break
+                    time.sleep(0.05)
+        self.assertIn("401 invalid API key", sent[-1])
+        self.assertIn("nobetci check", sent[-1])
+
+    def test_decommissioned_model_falls_through_to_the_next(self):
+        body = json.dumps({"error": {"message": "The model `m1` has been decommissioned"}}).encode()
+        fake = self.fake(http_error(400, body), ok({"choices": [{"message": {"content": "merhaba"}}]}))
+        ai = AI(make_config("/tmp", AI_API_KEY="k", AI_MODELS="m1,m2"))
+        with testing.instant():
+            self.assertEqual(ai.complete("s", "u"), "merhaba")
+        self.assertIn("decommissioned", ai.last_errors[0][1])
+        self.assertEqual(len(fake.requests), 2)
+
+    def test_403_does_not_skip_other_models(self):
+        fake = self.fake(http_error(403), ok({"choices": [{"message": {"content": "ok"}}]}))
+        ai = AI(make_config("/tmp", AI_API_KEY="k", AI_MODELS="m1,m2"))
+        with testing.instant():
+            self.assertEqual(ai.complete("s", "u"), "ok")
+        self.assertEqual(len(fake.requests), 2)
+
+    def test_probe_reports_each_model(self):
+        self.fake(http_error(404), ok({"choices": [{"message": {"content": "OK"}}]}))
+        ai = AI(make_config("/tmp", AI_API_KEY="k", AI_MODELS="old,new"))
+        with testing.instant():
+            results = ai.probe()
+        self.assertEqual([m for m, _ in results], ["old", "new"])
+        self.assertIn("404", results[0][1])
+        self.assertIsNone(results[1][1])
