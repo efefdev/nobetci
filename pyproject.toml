@@ -14,4 +14,4 @@ exclude = ["site"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "B"]
-ignore = ["E501"]
+ignore = ["E501", "E741"]
