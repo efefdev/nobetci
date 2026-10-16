@@ -6,8 +6,9 @@ the model is told they are data, and nothing the model writes can trigger a
 ban by itself: bans only ever come from the rule engine.
 """
 import re
-import time
 from datetime import datetime
+
+from nopanic import deadline, time_remaining
 
 from nobetci import net
 
@@ -77,32 +78,30 @@ class AI:
         return bool(self.api_key) or self.config.get("AI_PROVIDER") == "ollama"
 
     def complete(self, system, user, max_tokens=1500):
-        """Try each model in turn inside the time budget; returns text or None."""
-        deadline = time.monotonic() + self.budget
+        """Try each model in turn inside one time budget; returns text or None."""
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        for model in self.models:
-            left = deadline - time.monotonic()
-            if left <= 1:
-                print("AI time budget exhausted")
-                break
-            payload = {
-                "model": model,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                "max_tokens": max_tokens,
-                "temperature": 0.1,
-            }
-            try:
-                reply = net.request_json(f"{self.base_url}/chat/completions", payload, headers=headers,
-                                         timeout=min(45, left), attempts=2)
-                content = reply["choices"][0]["message"]["content"] or ""
-                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE).strip()
-                if content:
-                    return content
-            except Exception as exc:
-                code = getattr(exc, "code", None)
-                print(f"[{datetime.now()}] AI model {model} failed: {type(exc).__name__} {code or ''}")
-                if code in (401, 403):
-                    break  # every model would reject the same key
+        with deadline(self.budget):
+            for model in self.models:
+                if time_remaining() <= 1:
+                    print(f"AI time budget of {self.budget}s exhausted, skipping remaining models")
+                    break
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    "max_tokens": max_tokens,
+                    "temperature": 0.1,
+                }
+                try:
+                    # Transient errors are retried on the same model (Retry-After aware)
+                    reply = net.ai_chat(f"{self.base_url}/chat/completions", payload, headers)
+                    content = reply["choices"][0]["message"]["content"] or ""
+                    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL | re.IGNORECASE).strip()
+                    if content:
+                        return content
+                except Exception as exc:
+                    print(f"[{datetime.now()}] AI model {model} failed: {type(exc).__name__} {getattr(exc, 'code', '') or ''}")
+                    if net.is_auth_error(exc):
+                        break  # every model would reject the same key
         return None
 
     def analyze(self, logs_text):

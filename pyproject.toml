@@ -5,7 +5,7 @@ description = "Self-hosted watchman for Linux servers running nginx, controlled 
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["nopanic==0.3.0"]  # hash-pinned in requirements.txt
 
 [tool.ruff]
 line-length = 130

@@ -30,11 +30,13 @@ It complements fail2ban; it does not replace it.
 - **Daily report** at 23:55, **automatic unban** when a ban's time is up.
 - **Safe updates.** `/update` moves only between release tags, shows the changes first, asks for approval and
   can roll back.
-- **No dependencies.** Python 3.10+ standard library only; nothing is installed from PyPI.
+- **Resilient outbound calls.** Telegram, AI and Cloudflare requests go through [nopanic](https://github.com/dagdelenemre/nopanic):
+  retries with backoff that honor `Retry-After`, Telegram pacing and a circuit breaker during outages, and one time
+  budget for the AI model chain. It is the only dependency, pinned by hash and installed into `/opt/nobetci/venv`.
 
 ## Requirements
 
-- Ubuntu 22.04+ / Debian 12+ (systemd, journald), Python 3.10+
+- Ubuntu 22.04+ / Debian 12+ (systemd, journald), Python 3.10+ with `venv` (the installer adds `python3-venv` if needed)
 - nginx, ideally UFW
 - A Telegram bot from [@BotFather](https://t.me/BotFather) and your chat ID
 - Optional: a [Groq](https://console.groq.com) API key, a local Ollama, or another OpenAI-compatible endpoint
@@ -47,7 +49,8 @@ cd nobetci
 sudo python3 install.py
 ```
 
-The installer puts the code in `/opt/nobetci/app`, the `nobetci` command in `/usr/local/bin`, creates
+The installer puts the code in `/opt/nobetci/app` and its one dependency in `/opt/nobetci/venv` (hash-checked),
+the `nobetci` command in `/usr/local/bin`, creates
 `/etc/nobetci/config.env` (root only, `0600`) and enables the bot plus three timers. Then:
 
 1. Fill in `/etc/nobetci/config.env` (at least `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SERVER_IP`).
@@ -118,10 +121,20 @@ From then on use `/update`.
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -t .
+python3 -m venv .venv
+.venv/bin/pip install --require-hashes -r requirements.txt
+.venv/bin/python -m unittest discover -s tests -t .
 ```
 
-The tests need no network, tokens, nginx or root.
+The tests need no network, tokens, nginx or root. Network failures (timeouts, 429, 5xx, outages) are simulated
+with a fake `urlopen` and `nopanic.testing.instant()`.
+
+Raise a dependency only by editing `requirements.txt` with the new version's hashes from PyPI, after reading the release.
+
+## Credits
+
+Thanks to [Emre Kadir Dağdelen](https://github.com/dagdelenemre) for finding the 1.x import bug that silenced
+all alerts, and for the resilience design and failure-scenario tests behind `nobetci/net.py`.
 
 ## Disclaimer
 
@@ -146,7 +159,7 @@ düz Türkçe sorabilirsin. fail2ban'in yerine değil, yanında çalışır.
 eylem taşır) · `/banlist`'te IP başına *Kaldır*, her banda *Geri al* · esnek süreler (`30dk`, `6s`, `7g`, `2hf`,
 `kalici`) · komut dışındaki mesajlara yapay zekanın salt okunur cevabı · Groq, yerel Ollama ya da OpenAI uyumlu
 uç nokta · loglar dışarı çıkmadan maskelenir · `/audit` sertleştirme denetimi · günlük rapor ve otomatik ban
-kaldırma · yalnızca etiketli sürümlere, onayla ve geri alınabilir güncelleme · sıfır dış bağımlılık.
+kaldırma · yalnızca etiketli sürümlere, onayla ve geri alınabilir güncelleme · Telegram, yapay zeka ve Cloudflare çağrıları nopanic ile dayanıklı (tek bağımlılık, hash ile sabit).
 
 ### Kurulum
 
