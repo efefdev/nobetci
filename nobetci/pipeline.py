@@ -5,6 +5,7 @@ or by /analyze; everything is passed in memory, nothing goes through /tmp.
 """
 import fcntl
 import os
+import re
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -16,6 +17,13 @@ from nobetci.i18n import SEVERITY_EMOJI, esc, translator
 from nobetci.telegram import Telegram, button
 
 AI_WARN_EVERY = 1800
+AI_ALERTS_PER_RUN = 3
+# Shell commands, URLs and code in an AI-written "Action" are not shown:
+# the model reads attacker text and could be steered into suggesting them
+_COMMAND_LIKE = re.compile(
+    r"`|https?://|www\.|\$\(|&&|\|\||\|\s*\w|/(bin|tmp|dev)/|"
+    r"\b(sudo|curl|wget|bash|zsh|chmod|chown|apt-get|crontab|base64|eval|exec|ncat)\s|"
+    r"\b(rm|nc|sh|perl|python3?)\s+-|\b(apt|pip3?)\s+install\b|\biptables\s+-")
 last_ai_error = ""  # why the AI failed in the last run(), for /analyze
 
 
@@ -116,15 +124,20 @@ def _run(config, quiet):
                 tg.send(t("warn_ai", why=ai.error_summary()))
         else:
             threats = ai_mod.parse_threats(ai_text)
-            for th in threats:
-                if th["severity"] in ("HIGH", "CRITICAL") or (th["severity"] == "MEDIUM" and not detections):
-                    emoji = SEVERITY_EMOJI.get(th["severity"], "🔶")
-                    text = t("alert_title", emoji=emoji, sev=t(f"sev_{th['severity']}")) + "\n" + \
-                        t("alert_body", category=th["category"], description=th["description"])
-                    if th["action"]:
-                        text += "\n\n🎯 " + esc(th["action"])
-                    # The AI never proposes bans: an IP it names could be planted in the logs
-                    alerts.append((text, None))
+            notable = [th for th in threats
+                       if th["severity"] in ("HIGH", "CRITICAL") or (th["severity"] == "MEDIUM" and not detections)]
+            notable.sort(key=lambda th: -rules.SEVERITY_ORDER.index(th["severity"]))
+            for th in notable[:AI_ALERTS_PER_RUN]:
+                emoji = SEVERITY_EMOJI.get(th["severity"], "🔶")
+                text = t("ai_alert_title", emoji=emoji, sev=t(f"sev_{th['severity']}")) + "\n" + \
+                    t("alert_body", category=th["category"], description=th["description"])
+                if th["action"]:
+                    action = t("ai_action_hidden") if _COMMAND_LIKE.search(th["action"]) else esc(th["action"])
+                    text += "\n\n🎯 " + action
+                # The AI never proposes bans: an IP it names could be planted in the logs
+                alerts.append((text, None))
+            if len(notable) > AI_ALERTS_PER_RUN:
+                alerts.append((t("ai_more", n=len(notable) - AI_ALERTS_PER_RUN), None))
 
     highest_ai = max((th["severity"] for th in threats), key=rules.SEVERITY_ORDER.index, default="CLEAN")
     highest = max(rules.highest(detections), highest_ai, key=rules.SEVERITY_ORDER.index)

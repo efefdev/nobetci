@@ -105,7 +105,11 @@ Rules and their ban durations are in [`nobetci/rules.py`](nobetci/rules.py).
 - The bot answers only `TELEGRAM_CHAT_ID`. Strangers get no reply; you get an hourly summary of who tried.
   Button presses from any other chat are ignored. In a group chat, every member can press buttons.
 - Telegram can trigger a fixed set of actions only (ban, unban, update, roll back), never a shell command.
-- Logs are attacker-controlled. They are masked, fenced as data, and the AI cannot cause a ban.
+- Logs are attacker-controlled. They are masked before leaving the server, and any `<` `>` in them is replaced so
+  they cannot forge prompt sections. In chat, attacker-writable data (log lines, detection samples, the previous AI
+  analysis) sits in a separate *untrusted* section from server facts.
+- The AI cannot cause a ban. Its alerts are labelled as unverified AI opinions, at most three per run, and a
+  suggested action that contains a shell command or link is not shown.
 - The config file and database are root-only. Everything runs as root because it edits nginx config.
 - Updates follow release tags, never `main`, and need your approval.
 

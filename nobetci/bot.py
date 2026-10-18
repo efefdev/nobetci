@@ -249,7 +249,7 @@ class Bot:
         if ai_text is None and self.ai.enabled and not detections:
             text = self.t("analyze_failed", why=pipeline.last_ai_error or "-")
         elif ai_text and threats:
-            text = esc(ai_text)
+            text = self.t("analyze_ai_note") + "\n\n" + esc(ai_text)
         else:
             text = self.t("analyze_clean") if not detections else esc(
                 "\n".join(f"{d.name}: {d.ip} ({d.count})" for d in detections))
@@ -281,33 +281,36 @@ class Bot:
     # AI CHAT
 
     def snapshot(self, question):
+        """(facts, untrusted): trusted server state, and attacker-writable evidence."""
         mask = ai_mod.mask
-        parts = [f"Server time: {datetime.now():%Y-%m-%d %H:%M}"]
+        facts = [f"Server time: {datetime.now():%Y-%m-%d %H:%M}"]
+        untrusted = []
         try:
             with open("/proc/loadavg") as f:
-                parts.append("Load: " + " ".join(f.read().split()[:3]))
+                facts.append("Load: " + " ".join(f.read().split()[:3]))
         except OSError:
             pass
-        parts.append("Server facts:")
-        parts += [f"- {fact}" for fact in audit.server_facts(self.config, mask)]
+        facts.append("Server facts:")
+        facts += [f"- {fact}" for fact in audit.server_facts(self.config, mask)]
         bans = self.actions.active_bans()
-        parts.append(f"Active bans ({len(bans)}):")
-        parts += [f"- {mask(b['ip'])} reason={b['reason']} rule={b['rule_id']} since={b['timestamp']} until={b['expiry'] or 'permanent'}"
+        facts.append(f"Active bans ({len(bans)}):")
+        facts += [f"- {mask(b['ip'])} reason={b['reason']} rule={b['rule_id']} since={b['timestamp']} until={b['expiry'] or 'permanent'}"
                   for b in bans[:25]]
         since = (datetime.now() - timedelta(hours=24)).strftime(db.TIME_FMT)
         with db.connect(self.config["DB_PATH"]) as conn:
+            stats = conn.execute("SELECT * FROM statistics ORDER BY timestamp DESC LIMIT 7").fetchall()
+            facts.append("Daily stats: " + "; ".join(
+                f"{s['timestamp']} total={s['total_analyses']} critical={s['critical']} high={s['high']}" for s in stats))
             rows = conn.execute("SELECT timestamp, rule_name, severity, match_count, description FROM rule_detections"
                                 " WHERE timestamp >= ? ORDER BY id DESC LIMIT 40", (since,)).fetchall()
-            parts.append("Rule detections, last 24h:")
-            parts += [f"- {r['timestamp']} {r['severity']} {r['rule_name']} x{r['match_count']}: {mask(r['description'] or '')}"
-                      for r in rows]
+            untrusted.append("Rule detections, last 24h (ip: sample request):")
+            untrusted += [f"- {r['timestamp']} {r['severity']} {r['rule_name']} x{r['match_count']}: {mask(r['description'] or '')}"
+                          for r in rows]
             last = conn.execute("SELECT timestamp, raw_analysis FROM analyses WHERE raw_analysis != ''"
                                 " ORDER BY id DESC LIMIT 1").fetchone()
             if last:
-                parts.append(f"Last AI analysis ({last['timestamp']}):\n{last['raw_analysis'][:2500]}")
-            stats = conn.execute("SELECT * FROM statistics ORDER BY timestamp DESC LIMIT 7").fetchall()
-            parts.append("Daily stats: " + "; ".join(
-                f"{s['timestamp']} total={s['total_analyses']} critical={s['critical']} high={s['high']}" for s in stats))
+                untrusted.append(f"Previous AI analysis ({last['timestamp']}), itself derived from logs:\n"
+                                 f"{last['raw_analysis'][:2500]}")
             # The admin may ask about a specific IP: give its own history, unmasked only for that IP
             for raw in re.findall(IP_PATTERN, question)[:2]:
                 ip = parse_ip(raw)
@@ -318,17 +321,17 @@ class Bot:
                                     " ORDER BY id DESC LIMIT 10", (ip,)).fetchall()
                 found = conn.execute("SELECT timestamp, rule_name, match_count, description FROM rule_detections"
                                      " WHERE description LIKE ? ORDER BY id DESC LIMIT 10", (f"{ip}:%",)).fetchall()
-                parts.append(f"About {ip}: protected={self.actions.protection.reason(ip) or 'no'}")
-                parts += [f"- ban {h['timestamp']} reason={h['reason']} rule={h['rule_id']} until={h['expiry'] or 'permanent'} active={h['active']}"
+                facts.append(f"About {ip}: protected={self.actions.protection.reason(ip) or 'no'}")
+                facts += [f"- ban {h['timestamp']} reason={h['reason']} rule={h['rule_id']} until={h['expiry'] or 'permanent'} active={h['active']}"
                           for h in hist]
-                parts += [f"- detection {d['timestamp']} {d['rule_name']} x{d['match_count']}: {mask(d['description'] or '')}"
-                          for d in found]
+                untrusted += [f"- detection for {ip} {d['timestamp']} {d['rule_name']} x{d['match_count']}: {mask(d['description'] or '')}"
+                              for d in found]
                 batch = logs.collect(self.config, datetime.now() - timedelta(hours=24))
                 own = [l for l in batch.access + batch.auth if ip in l][-15:]
                 if own:
-                    parts.append(f"Recent log lines from {ip} (other data masked):")
-                    parts += [mask(l)[:300] for l in own]
-        return "\n".join(parts)[:12000]
+                    untrusted.append(f"Recent log lines from {ip} (other data masked):")
+                    untrusted += [mask(l)[:300] for l in own]
+        return "\n".join(facts)[:5000], "\n".join(untrusted)[:8000]
 
     def chat(self, text):
         if not self.chat_enabled:
@@ -337,7 +340,8 @@ class Bot:
 
         def job():
             self.tg.typing()
-            answer = self.ai.chat(text, self.snapshot(text))
+            facts, untrusted = self.snapshot(text)
+            answer = self.ai.chat(text, facts, untrusted)
             self.send(esc(answer) if answer else self.t("chat_failed", why=self.ai.error_summary()))
         self.background(job)
 
